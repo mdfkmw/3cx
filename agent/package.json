@@ -1,0 +1,16 @@
+{
+  "name": "agent",
+  "version": "1.0.0",
+  "description": "",
+  "main": "ecosystem.config.js",
+  "scripts": {
+    "tray": "electron tray.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "electron": "^40.0.0"
+  }
+}
