@@ -140,9 +140,6 @@ export default function ReservationPage({ userRole, user }) {
 
 
 
-  const [incomingCall, setIncomingCall] = useState(null);
-  const lastIncomingEventIdRef = useRef(null);
-  const incomingCallPollTimerRef = useRef(null);
   // 🗺️ ID-ul cursei (trip) curente pentru cereri precise
   const [tripId, setTripId] = useState(null);
 
@@ -212,215 +209,6 @@ export default function ReservationPage({ userRole, user }) {
     }
   }, [isWideView, showWideSeatControls]);
 
-  useEffect(() => {
-    let eventSource;
-    let stopped = false;
-
-    const deliver = (payload) => {
-      if (!payload || stopped) return;
-      const rawPhone = payload.phone != null ? String(payload.phone).trim() : '';
-      const digitsPayload = payload.digits != null
-        ? String(payload.digits).replace(/\D/g, '').slice(0, 20)
-        : '';
-      const hasValue = rawPhone || digitsPayload;
-      if (!hasValue) return;
-      const eventId = payload.id != null
-        ? String(payload.id)
-        : String(payload.received_at || Date.now());
-      if (lastIncomingEventIdRef.current === eventId) {
-        return;
-      }
-      lastIncomingEventIdRef.current = eventId;
-      setIncomingCall({
-        id: eventId,
-        phone: rawPhone || digitsPayload,
-        digits: digitsPayload,
-        extension: payload.extension != null ? String(payload.extension) : null,
-        source: payload.source != null ? String(payload.source) : null,
-        received_at: payload.received_at || new Date().toISOString(),
-      });
-    };
-
-    const pollLatest = async () => {
-      try {
-        const res = await fetch('/api/incoming-calls/last', { credentials: 'include' });
-        if (!res.ok) {
-          if (res.status === 401 || res.status === 403) {
-            if (incomingCallPollTimerRef.current) {
-              clearInterval(incomingCallPollTimerRef.current);
-              incomingCallPollTimerRef.current = null;
-            }
-          }
-          return;
-        }
-        const data = await res.json();
-        if (!stopped && data?.call) {
-          deliver(data.call);
-        }
-      } catch (err) {
-        // ignorăm erorile de rețea; se va reîncerca la următorul poll
-      }
-    };
-
-    const ensurePolling = () => {
-      if (incomingCallPollTimerRef.current) return;
-      incomingCallPollTimerRef.current = setInterval(pollLatest, 10000);
-    };
-
-    pollLatest();
-    ensurePolling();
-
-    if (typeof window !== 'undefined' && 'EventSource' in window) {
-      const API_BASE = import.meta.env.VITE_API_URL ?? "";
-      eventSource = new EventSource(`${API_BASE}/api/incoming-calls/stream`, { withCredentials: true });
-
-      eventSource.addEventListener('call', (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-          deliver(payload);
-        } catch (err) {
-          console.warn('[incoming-call] Nu am putut parsa payload-ul din SSE', err);
-        }
-      });
-      eventSource.onerror = () => {
-        ensurePolling();
-      };
-    }
-
-    return () => {
-      stopped = true;
-      if (eventSource) {
-        eventSource.close();
-      }
-      if (incomingCallPollTimerRef.current) {
-        clearInterval(incomingCallPollTimerRef.current);
-        incomingCallPollTimerRef.current = null;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!incomingCall) return;
-    const digits = String(incomingCall.digits || incomingCall.phone || '').replace(/\D/g, '');
-    const targetValue = incomingCall.phone || digits;
-    if (!targetValue) return;
-    let ignore = false;
-    let timeout;
-
-    const fetchDetailsAndToast = async () => {
-      let passengerName = '';
-      let lastSegment = null;
-      let noShowsCount = 0;
-
-      try {
-        const historyRes = await fetch(`/api/people/history?phone=${encodeURIComponent(digits)}`, {
-          credentials: 'include',
-        });
-        if (historyRes.ok) {
-          const historyData = await historyRes.json();
-          if (historyData?.exists) {
-            passengerName = historyData.name || '';
-            const latestReservation = Array.isArray(historyData.history) ? historyData.history[0] : null;
-            const boardName = latestReservation?.board_name || latestReservation?.board_at || '';
-            const exitName = latestReservation?.exit_name || latestReservation?.exit_at || '';
-            if (boardName && exitName) {
-              lastSegment = { board: boardName, exit: exitName };
-            }
-          }
-        }
-      } catch (err) {
-        // ignorăm erorile pentru toast
-      }
-
-      try {
-        const blacklistRes = await fetch(`/api/blacklist/check?phone=${encodeURIComponent(digits)}`, {
-          credentials: 'include',
-        });
-        if (blacklistRes.ok) {
-          const blacklistData = await blacklistRes.json();
-          const aliasCount = Array.isArray(blacklistData?.no_shows)
-            ? blacklistData.no_shows.length
-            : Array.isArray(blacklistData?.noShows)
-              ? blacklistData.noShows.length
-              : 0;
-          const computedCount = Number(
-            blacklistData?.no_shows_count ?? blacklistData?.noShowsCount ?? aliasCount
-          );
-          if (Number.isFinite(computedCount)) {
-            noShowsCount = computedCount;
-          }
-        }
-      } catch (err) {
-        // ignorăm erorile pentru toast
-      }
-
-      if (ignore) return;
-
-      let message = `Ultimul apel: ${targetValue}.`;
-      if (passengerName) {
-        const segmentText = lastSegment
-          ? ` Ultimul segment rezervat a fost intre ${lastSegment.board} si ${lastSegment.exit}.`
-          : '';
-        const warningText = noShowsCount > 0 ? ` Atentie, are ${noShowsCount} neprezentari!` : '';
-        message = `Ultimul apel: ${passengerName} - ${targetValue}.${segmentText}${warningText}`;
-      }
-
-      showToast(message, 'info', 2500);
-
-    };
-
-    fetchDetailsAndToast();
-    return () => {
-      ignore = true;
-
-    };
-  }, [incomingCall, setToastMessage, setToastType]);
-
-  const handleApplyIncomingCallToSeat = useCallback((seatId) => {
-    if (!incomingCall) return false;
-    const digits = String(incomingCall.digits || incomingCall.phone || '').replace(/\D/g, '');
-    const targetValue = incomingCall.phone || digits;
-    if (!targetValue) return false;
-
-    const seatInfo = selectedSeats.find((s) => s.id === seatId) || null;
-    const seatLabel = seatInfo?.label || '';
-
-    let applied = false;
-    setPassengersData((prev) => {
-      const current = prev[seatId] || {};
-      if (current.phone === targetValue) {
-        return prev;
-      }
-      const updated = {
-        ...prev,
-        [seatId]: {
-          ...current,
-          phone: targetValue,
-
-          // ✅ reset ca să NU rămână triunghiul de conflict de la telefonul vechi
-          person_id: null,
-
-          // ✅ (opțional dar recomandat) ca să se poată reaplica segmentul din istoric pt noul număr
-          segmentAutoAppliedPhone: null,
-        },
-
-      };
-      applied = true;
-      return updated;
-    });
-
-    if (applied) {
-      const labelText = seatLabel ? ` (loc ${seatLabel})` : '';
-      showToast(
-        `Număr preluat din ultimul apel${labelText}: ${targetValue}`,
-        'info',
-        2500
-      );
-
-    }
-
-    return applied;
-  }, [incomingCall, selectedSeats, setPassengersData, setToastMessage, setToastType]);
 
   useEffect(() => {
     if (!isTimelineModalOpen) {
@@ -488,16 +276,6 @@ export default function ReservationPage({ userRole, user }) {
 
   // Derivăm o singură dată lista de nume stații din routeStations
   const stops = useMemo(() => routeStations.map(s => s.name), [routeStations]);
-
-  const incomingCallTimestamp = incomingCall?.received_at || null;
-  const incomingCallTime = useMemo(() => {
-    if (!incomingCallTimestamp) return '';
-    try {
-      return format(new Date(incomingCallTimestamp), 'HH:mm:ss');
-    } catch (err) {
-      return '';
-    }
-  }, [incomingCallTimestamp]);
 
   // ⏰ Programarea selectată pentru cursa aleasă
   const [selectedSchedule, setSelectedSchedule] = useState(null);
@@ -5653,21 +5431,6 @@ export default function ReservationPage({ userRole, user }) {
                   </div>
                 )}
 
-                {incomingCall && (
-                  <div className="p-2 border border-blue-200 bg-blue-50 text-sm text-blue-800 rounded">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-semibold">📞 Ultimul apel:</span>
-                      <span className="font-mono text-base">{incomingCall.phone}</span>
-                      {incomingCall.extension && (
-                        <span className="text-xs text-blue-700">int: {incomingCall.extension}</span>
-                      )}
-                      {incomingCallTime && (
-                        <span className="text-xs text-blue-600">ora {incomingCallTime}</span>
-                      )}
-                    </div>
-                  </div>
-                )}
-
                 {selectedSeats.map((seat, index) => (
                   <div
                     key={seat.id + "-" + index}
@@ -5693,8 +5456,6 @@ export default function ReservationPage({ userRole, user }) {
                         fetchPrice={fetchPrice}
                         setToastMessage={setToastMessage}
                         setToastType={setToastType}
-                        incomingCall={incomingCall}
-                        onApplyIncomingCall={handleApplyIncomingCallToSeat}
                         toggleSeat={toggleSeat}
                         seats={seats}
                         selectedDate={format(selectedDate, 'yyyy-MM-dd')}

@@ -33,8 +33,6 @@ function csrfProtect(req, res, next) {
   // protejăm doar /api/*
   if (!p.startsWith('/api/')) return next();
 
-    // ✅ EXCEPȚIE pentru webhook PBX (are deja X-PBX-Secret în ruta lui)
-  if (p.startsWith('/api/incoming-calls')) return next();
 
     // ✅ EXCEPȚIE pentru agent (machine-to-machine, autentificat cu AGENT_KEY)
   if (p === '/api/agent/poll') return next();

@@ -20,8 +20,6 @@ const PassengerForm = ({
     fetchPrice,
     setToastMessage,
     setToastType,
-    incomingCall,
-    onApplyIncomingCall,
     toggleSeat,
     seats,
     selectedDate,
@@ -124,14 +122,6 @@ const PassengerForm = ({
 
     const passenger = passengersData[seat.id] || {};
     const { errors } = isPassengerValid(passenger);
-    const incomingPhoneValue = incomingCall?.phone ? String(incomingCall.phone).trim() : '';
-    const incomingDigits = incomingCall?.digits ? String(incomingCall.digits).replace(/\D/g, '') : '';
-    const passengerValue = typeof passenger.phone === 'string' ? passenger.phone : '';
-    const passengerHasPhone = passengerValue.trim().length > 0;
-    const passengerDigits = passengerValue.replace(/\D/g, '');
-    const canApplyIncomingCall = Boolean(onApplyIncomingCall)
-        && Boolean(incomingPhoneValue || incomingDigits)
-        && (!passengerHasPhone || passengerDigits !== incomingDigits);
     // ─── blacklist warning state ───
     const [blacklistInfo, setBlacklistInfo] = useState(null);
     const [showBlacklistDetails, setShowBlacklistDetails] = useState(false);
@@ -165,6 +155,40 @@ const PassengerForm = ({
     if (exitInfo?.note) exitDetailsParts.push(exitInfo.note);
 
     const hasStopDetails = boardDetailsParts.length > 0 || exitDetailsParts.length > 0;
+
+    const handlePastePhoneFromClipboard = async () => {
+        const hasClipboardApi = typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.readText === 'function';
+        if (!hasClipboardApi) {
+            setToastMessage('Clipboard indisponibil în acest browser. Copiază manual numărul.');
+            setToastType('error');
+            return;
+        }
+
+        try {
+            const rawText = await navigator.clipboard.readText();
+            const nextValue = String(rawText || '').trim();
+            if (!nextValue) {
+                setToastMessage('Clipboard-ul este gol.');
+                setToastType('error');
+                return;
+            }
+
+            setPassengersData(prev => ({
+                ...prev,
+                [seat.id]: { ...prev[seat.id], phone: nextValue, person_id: null, segmentAutoAppliedPhone: null }
+            }));
+
+            setHasConflict(false);
+            setConflictInfo([]);
+            onConflictInfo([]);
+            setShowConflictDetails(false);
+            setToastMessage('Număr lipit din clipboard.');
+            setToastType('info');
+        } catch (err) {
+            setToastMessage('Nu am putut citi clipboard-ul. Verifică permisiunile browserului.');
+            setToastType('error');
+        }
+    };
 
     const updateSegmentForSeat = (prevState, rawBoard, rawExit, options = {}) => {
         /*  ➟  opţiune nouă:
@@ -958,19 +982,14 @@ const PassengerForm = ({
 
                     {/* container pentru toate iconițele, ca să le poziționăm pe orizontală */}
                     <div className="absolute top-2 right-3 flex space-x-1">
-                        {canApplyIncomingCall && (
-                            <button
-                                type="button"
-                                onClick={() => onApplyIncomingCall?.(seat.id)}
-                                className="text-blue-600 text-lg hover:opacity-75"
-                                title="Copiază în acest câmp numărul ultimului apel primit"
-                            >
-                                📞
-                            </button>
-                        )}
-
-
-
+                        <button
+                            type="button"
+                            onClick={handlePastePhoneFromClipboard}
+                            className="text-blue-600 text-lg hover:opacity-75"
+                            title="Lipește numărul de telefon din clipboard"
+                        >
+                            📋
+                        </button>
 
                         {/* ℹ️ ISTORIC (doar dacă NU e blacklist și NU are no-shows) */}
                         {personHistory?.exists && !showBlacklistDot && !showNoShowBang && (

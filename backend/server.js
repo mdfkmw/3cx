@@ -101,7 +101,6 @@ const refundsRoutes = require('./routes/refunds');
 const userPrefs = require('./routes/userPrefs');
 const intentsRoutes = require('./routes/intents');
 const chatRoutes = require('./routes/chat');
-const incomingCallsRouter = require('./routes/incomingCalls');
 const mobileRoutes = require('./routes/mobile');
 
 // === SERVEȘTE FRONTEND-UL (Vite build) DIN EXPRESS ===
@@ -273,7 +272,6 @@ app.use('/api/mobile', mobileRoutes);
 
 
 app.use('/api/public', publicSiteRoutes);
-app.use('/api/incoming-calls', incomingCallsRouter);
 // ✅ Blacklist: montăm la /api (rutele interne sunt /blacklist, /blacklist/check etc.)
 //    RBAC este definit per-metodă în routes/blacklist.js
 app.use('/api', require('./routes/blacklist'));
