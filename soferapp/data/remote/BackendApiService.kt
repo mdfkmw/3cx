@@ -3,7 +3,9 @@ package ro.priscom.sofer.ui.data.remote
 import com.google.gson.annotations.SerializedName
 import okhttp3.JavaNetCookieJar
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.logging.HttpLoggingInterceptor
+import okhttp3.ResponseBody
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
@@ -12,6 +14,7 @@ import retrofit2.http.POST
 import retrofit2.http.Query
 import java.net.CookieManager
 import java.net.CookiePolicy
+import java.net.URI
 import retrofit2.http.Path
 
 // === DTO-uri pentru /api/auth/login ===
@@ -235,6 +238,9 @@ data class CancelResponse(
 
 interface BackendApiService {
 
+    @GET("/")
+    suspend fun warmup(): ResponseBody
+
     @POST("/api/auth/login")
     suspend fun login(
         @Body body: LoginRequest
@@ -353,8 +359,53 @@ object BackendApi {
 
         OkHttpClient.Builder()
             .cookieJar(JavaNetCookieJar(cookieManager))
+            .addInterceptor { chain ->
+                val request = chain.request()
+                val csrfToken = getCsrfToken()
+
+                val shouldAttachCsrf = request.method in setOf("POST", "PUT", "PATCH", "DELETE")
+                val requestWithHeaders = if (shouldAttachCsrf && !csrfToken.isNullOrBlank()) {
+                    request.newBuilder()
+                        .header("X-CSRF-Token", csrfToken)
+                        .build()
+                } else {
+                    request
+                }
+
+                chain.proceed(requestWithHeaders)
+            }
             .addInterceptor(logger)
             .build()
+    }
+
+    private fun getCsrfToken(): String? {
+        return try {
+            val uri = URI(BASE_URL)
+            cookieManager.cookieStore
+                .get(uri)
+                .firstOrNull { it.name.equals("csrf_token", ignoreCase = true) }
+                ?.value
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun ensureCsrfCookie() {
+        val hasToken = !getCsrfToken().isNullOrBlank()
+        if (hasToken) return
+
+        try {
+            val request = Request.Builder()
+                .url(BASE_URL)
+                .get()
+                .build()
+
+            okHttpClient.newCall(request).execute().use { response ->
+                response.body?.close()
+            }
+        } catch (_: Exception) {
+            // ignorăm aici; login-ul va eșua explicit dacă backend-ul nu poate fi contactat
+        }
     }
 
     val service: BackendApiService by lazy {

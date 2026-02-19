@@ -7,6 +7,8 @@ class RemoteRepository {
 
     suspend fun login(identifier: String, password: String): AuthUserDto? {
         return try {
+            BackendApi.ensureCsrfCookie()
+
             val response = BackendApi.service.login(
                 LoginRequest(identifier, password)
             )
