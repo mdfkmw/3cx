@@ -5,7 +5,6 @@ import okhttp3.JavaNetCookieJar
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.logging.HttpLoggingInterceptor
-import okhttp3.ResponseBody
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
@@ -238,8 +237,6 @@ data class CancelResponse(
 
 interface BackendApiService {
 
-    @GET("/")
-    suspend fun warmup(): ResponseBody
 
     @POST("/api/auth/login")
     suspend fun login(
@@ -352,6 +349,12 @@ object BackendApi {
         setCookiePolicy(CookiePolicy.ACCEPT_ALL)
     }
 
+    private val bootstrapHttpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .cookieJar(JavaNetCookieJar(cookieManager))
+            .build()
+    }
+
     private val okHttpClient: OkHttpClient by lazy {
         val logger = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
@@ -361,9 +364,13 @@ object BackendApi {
             .cookieJar(JavaNetCookieJar(cookieManager))
             .addInterceptor { chain ->
                 val request = chain.request()
-                val csrfToken = getCsrfToken()
-
                 val shouldAttachCsrf = request.method in setOf("POST", "PUT", "PATCH", "DELETE")
+
+                if (shouldAttachCsrf && getCsrfToken().isNullOrBlank()) {
+                    ensureCsrfCookie()
+                }
+
+                val csrfToken = getCsrfToken()
                 val requestWithHeaders = if (shouldAttachCsrf && !csrfToken.isNullOrBlank()) {
                     request.newBuilder()
                         .header("X-CSRF-Token", csrfToken)
@@ -400,7 +407,7 @@ object BackendApi {
                 .get()
                 .build()
 
-            okHttpClient.newCall(request).execute().use { response ->
+            bootstrapHttpClient.newCall(request).execute().use { response ->
                 response.body?.close()
             }
         } catch (_: Exception) {
