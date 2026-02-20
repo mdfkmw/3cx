@@ -1070,8 +1070,67 @@ router.post('/', async (req, res) => {
           [targetTripId, seatId]
         );
 
-        // Discount (opțional) — DOAR pentru rezervările NOI aplicăm promo; la update nu refacem istoricul
-        // (dacă vrei și la update, se poate adăuga logică separată cu atenție la dublări)
+        // Recalculăm pricing/discount și la update (schimbare segment, tip reducere etc.)
+        const basePrice = Number(p.price ?? 0);
+        let typeDiscountAmount = 0;
+
+        await db.query(
+          `DELETE FROM reservation_discounts WHERE reservation_id = ?`,
+          [p.reservation_id]
+        );
+
+        if (p.discount_type_id) {
+          const qDisc = await db.query(
+            `SELECT id, code, label, value_off, type FROM discount_types WHERE id = ?`,
+            [p.discount_type_id]
+          );
+          if (!qDisc.rows.length) throw new Error('Tip de discount inexistent');
+          const disc = qDisc.rows[0];
+
+          typeDiscountAmount =
+            disc.type === 'percent'
+              ? +(basePrice * Number(disc.value_off) / 100).toFixed(2)
+              : +Number(disc.value_off);
+          if (typeDiscountAmount > basePrice) typeDiscountAmount = basePrice;
+
+          await db.query(
+            `
+            INSERT INTO reservation_discounts
+              (reservation_id, discount_type_id, discount_amount, discount_snapshot)
+            VALUES (?, ?, ?, ?)
+            `,
+            [p.reservation_id, disc.id, typeDiscountAmount, Number(disc.value_off)]
+          );
+        }
+
+        const netPrice = Math.max(0, basePrice - Number(typeDiscountAmount || 0));
+        const listId = p.price_list_id || price_list_id;
+        if (!listId) throw new Error('price_list_id lipsă în payload');
+
+        const effChannel = deriveBookingChannel(req.user?.role, booking_channel);
+        const pricingUpdate = await db.query(
+          `
+          UPDATE reservation_pricing
+             SET price_value = ?,
+                 price_list_id = ?,
+                 pricing_category_id = ?,
+                 booking_channel = ?,
+                 employee_id = ?
+           WHERE reservation_id = ?
+          `,
+          [netPrice, listId, p.category_id, effChannel, Number(req.user?.id) || null, p.reservation_id]
+        );
+
+        if (pricingUpdate.rowCount === 0) {
+          await db.query(
+            `
+            INSERT INTO reservation_pricing
+              (reservation_id, price_value, price_list_id, pricing_category_id, booking_channel, employee_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+            `,
+            [p.reservation_id, netPrice, listId, p.category_id, effChannel, Number(req.user?.id) || null]
+          );
+        }
 
       } else {
         // INSERT rezervare
