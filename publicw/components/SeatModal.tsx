@@ -96,7 +96,9 @@ export default function SeatModal({ isOpen, onClose, onConfirm, trip, travelDate
   const [discountTypes, setDiscountTypes] = useState<DiscountTypeOption[]>([])
   const [discountTypesLoading, setDiscountTypesLoading] = useState(false)
   const [discountTypesError, setDiscountTypesError] = useState<string | null>(null)
-  const [passengerDetails, setPassengerDetails] = useState<Record<number, { discountTypeId: number | null }>>({})
+    const [passengerDetails, setPassengerDetails] = useState<
+    Record<number, { name: string; discountTypeId: number | null }>
+  >({})
   const lastSeatCountRef = useRef(0)
 const intentsSocketRef = useRef<Socket | null>(null)
 
@@ -554,7 +556,7 @@ return () => {
   const passengerList = useMemo(
     () =>
       selectedSeats.map((seatId) => {
-        const data = passengerDetails[seatId] ?? { discountTypeId: null }
+        const data = passengerDetails[seatId] ?? { name: '', discountTypeId: null }
         const discountOption = data.discountTypeId ? discountTypeMap.get(data.discountTypeId) ?? null : null
         return {
           seatId,
