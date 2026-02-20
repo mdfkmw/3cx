@@ -13,7 +13,6 @@ import LoginPage from './pages/LoginPage';
 import TerminalSelectPage from './pages/TerminalSelectPage';
 
 import AuditLog from './pages/AuditLog';
-import AdminCallLog from './pages/AdminCallLog';
 import ReservationDetails from './components/ReservationDetails.jsx';
 import AgentChatPopup from './components/AgentChatPopup.jsx';
 import InviteAcceptPage from './pages/InviteAcceptPage';
@@ -180,7 +179,6 @@ function App() {
           <>
             <Link to="/admin/reports" className="text-blue-600 hover:underline">Rapoarte</Link>
             <Link to="/admin/log" className="text-blue-600 hover:underline">Log</Link>
-            <Link to="/admin/call-log" className="text-blue-600 hover:underline">Call log</Link>
           </>
         )}
         {/* Logout ca link, doar când e autentificat */}
@@ -333,14 +331,6 @@ function App() {
             </Guard>
           }
 
-        />
-        <Route
-          path="/admin/call-log"
-          element={
-            <Guard allow={['admin', 'operator_admin']}>
-              <AdminCallLog />
-            </Guard>
-          }
         />
         <Route path="/rezervare/:id" element={<ReservationDetails />} />
       </Routes>
