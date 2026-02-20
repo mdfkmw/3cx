@@ -366,20 +366,17 @@ object BackendApi {
                 val request = chain.request()
                 val shouldAttachCsrf = request.method in setOf("POST", "PUT", "PATCH", "DELETE")
 
-                if (shouldAttachCsrf && getCsrfToken().isNullOrBlank()) {
-                    ensureCsrfCookie()
-                }
+                val initialRequest = withCsrfHeader(request, shouldAttachCsrf)
+                val response = chain.proceed(initialRequest)
 
-                val csrfToken = getCsrfToken()
-                val requestWithHeaders = if (shouldAttachCsrf && !csrfToken.isNullOrBlank()) {
-                    request.newBuilder()
-                        .header("X-CSRF-Token", csrfToken)
-                        .build()
+                if (!shouldRetryForCsrf(response, shouldAttachCsrf)) {
+                    response
                 } else {
-                    request
+                    response.close()
+                    ensureCsrfCookie(force = true)
+                    val retriedRequest = withCsrfHeader(request, shouldAttachCsrf)
+                    chain.proceed(retriedRequest)
                 }
-
-                chain.proceed(requestWithHeaders)
             }
             .addInterceptor(logger)
             .build()
@@ -397,9 +394,33 @@ object BackendApi {
         }
     }
 
-    fun ensureCsrfCookie() {
+    private fun withCsrfHeader(request: Request, shouldAttachCsrf: Boolean): Request {
+        if (!shouldAttachCsrf) return request
+
+        if (getCsrfToken().isNullOrBlank()) {
+            ensureCsrfCookie()
+        }
+
+        val csrfToken = getCsrfToken()
+        return if (!csrfToken.isNullOrBlank()) {
+            request.newBuilder()
+                .header("X-CSRF-Token", csrfToken)
+                .build()
+        } else {
+            request
+        }
+    }
+
+    private fun shouldRetryForCsrf(response: okhttp3.Response, shouldAttachCsrf: Boolean): Boolean {
+        if (!shouldAttachCsrf || response.code != 403) return false
+
+        val responseBody = response.peekBody(1024).string()
+        return responseBody.contains("csrf_invalid")
+    }
+
+    fun ensureCsrfCookie(force: Boolean = false) {
         val hasToken = !getCsrfToken().isNullOrBlank()
-        if (hasToken) return
+        if (!force && hasToken) return
 
         try {
             val request = Request.Builder()
